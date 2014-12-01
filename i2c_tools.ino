@@ -1,15 +1,14 @@
-// --------------------------------------
-// i2c tools for Arduino
-//
+/*
+ --------------------------------------
+ i2c tools for Arduino
+ */
 
 
 #include <Wire.h>
 
-#define DATA_LENGTH 256
-#define SERIALBUFFER_LENGTH 64
-
 #define PRINT_ONLY_ASCCI 1
 #define DEBUG 0
+
 
 
 #define CHAR_SPACE 0x100
@@ -20,16 +19,21 @@
 #define COMMAND_DUMP 1
 #define COMMAND_GET 2
 #define COMMAND_SET 3
+#define COMMAND_HELP 4
 
 #define MODE_PRINT_NORMAL 0
 #define MODE_PRINT_SHOW_ASCCI 1
 
 #define MODE_DETECT_FAST 0
-#define MODE_DETECT_WRITE_ONLY 1
-#define MODE_DETECT_READWRITE 2
+#define MODE_DETECT_READ_ONLY 1
+#define MODE_DETECT_WRITE_ONLY 2
+#define MODE_DETECT_READWRITE 3
+
 
 #define MODE_DUMP_NORMAL 0
 #define MODE_DUMP_AUTOINCREMENT 1
+#define MODE_DUMP_NORMAL_WITHOUTWRITE 2
+#define MODE_DUMP_AUTOINCREMENT_WITHOUTWRITE 3
 
 #define MODE_GET_NORMAL 0
 #define MODE_GET_AUTOINCREMENT 1
@@ -43,15 +47,19 @@
 #define ASCCI_NL 0x0A
 #define ASCCI_CR 0x0D
 
+#define DATA_LENGTH 256
+//ARG_MAX_COUNT * (max length of number(bin == 8+2) + space) + command + space + CR + NL + (end of string)
+#define SERIALBUFFER_LENGTH ARG_MAX_COUNT * (10 + 1) + 1 + 1 + 1 + 1 + 1
+
 int data[DATA_LENGTH + 1];
-char serialbuffer[SERIALBUFFER_LENGTH + 1];
+char serialbuffer[SERIALBUFFER_LENGTH + 16];
 
 void setup()
 {
 	Wire.begin();
 
 	Serial.begin(9600);
-	while(!Serial)Serial.println("\nI2C Tools");
+	while(!Serial) printHelp();
 }
 
 
@@ -60,8 +68,8 @@ void loop()
 	static int buffer_pos = 0;
 	int temp = 0;
 
-	//ARG_MAX_COUNT * (max length of number(bin == 8+2) + space) + command + space + CR + NL + (end of string)
-	buffer_pos = Serial.readBytesUntil(ASCCI_NL, serialbuffer, ARG_MAX_COUNT * (10 + 1) + 1 + 1 + 1 + 1 + 1 );
+	
+	buffer_pos = Serial.readBytesUntil(ASCCI_NL, serialbuffer,  SERIALBUFFER_LENGTH);
     
 	if(buffer_pos > 0)
 	{
@@ -108,6 +116,7 @@ byte handelCommand(char* buffer, int buffer_length)
 	else if(serialbuffer[pos] == '1') command = COMMAND_DUMP;
 	else if(serialbuffer[pos] == '2') command = COMMAND_GET;
 	else if(serialbuffer[pos] == '3') command = COMMAND_SET;
+	else if((serialbuffer[pos] == 'h') || (serialbuffer[pos] == 'H'))  command = COMMAND_HELP;
 	else return 2;
 	pos++;
 
@@ -147,7 +156,7 @@ byte handelCommand(char* buffer, int buffer_length)
 			else if(arg_count == 2) i2cdetect(arg[0], arg[1]);
 			else if(arg_count == 3) i2cdetect(arg[0], arg[1], arg[2]);
 			else return 7;
-			break;//just for tradishen
+			break;
 		}
 		case COMMAND_DUMP:
 		{
@@ -155,14 +164,14 @@ byte handelCommand(char* buffer, int buffer_length)
 			else if(arg_count == 3) i2cdump(arg[0], arg[1], arg[2]);
 			else if(arg_count == 4) i2cdump(arg[0], arg[1], arg[2], arg[3]);
 			else return 8;
-			break;//just for tradishen
+			break;
 		}
 		case COMMAND_GET:
 		{
 			if(arg_count == 1) i2cget(arg[0]);
 			else if(arg_count == 2) i2cget(arg[0], arg[1]);
 			else return 9;
-			break;//just for tradishen
+			break;
 		}
 		case COMMAND_SET:
 		{
@@ -170,12 +179,17 @@ byte handelCommand(char* buffer, int buffer_length)
 			else if(arg_count == 2) i2cset(arg[0], arg[1]);
 			else if(arg_count == 3) i2cset(arg[0], arg[1], arg[2]);
 			else return 10;
-			break;//just for tradishen
+			break;
+		}
+		case COMMAND_HELP:
+		{
+			printHelp();
+			break;
 		}
 		default:
 		{
 			return 11;
-			break;//just for tradishen
+			break;
 		}
 	}
 	return 0;
@@ -266,17 +280,21 @@ void printHelp(void)
 	Serial.println("1 = i2cdump");
 	Serial.println("2 = i2cget");
 	Serial.println("3 = i2cset");
+	Serial.println("h = show this help page");
 	Serial.println();
 	Serial.println("i2cdetect [start stop [mode]]");
 	Serial.println("     Mode's");
 	Serial.println("     0 = Fast detect, send a start condition");
-	Serial.println("     1 = Send a single 0x00 on the bus");
-	Serial.println("     2 = Send a single 0x00, and try to read a register");
+	Serial.println("     1 = Just try to read");
+	Serial.println("     2 = Send a single write 0x00 on the bus");
+	Serial.println("     3 = Send a single write 0x00, and try to read a register");
 	Serial.println();
 	Serial.println("i2cdump address [start stop [mode]]");
 	Serial.println("     Mode's");
 	Serial.println("     0 = Read one register at once");
-	Serial.println("     1 = use for devices with auto increment");
+	Serial.println("     1 = Use for devices with auto increment");
+	Serial.println("     2 = Read one register at once, Do not send write comand");
+	Serial.println("     3 = Use for devices with auto increment, Do not send write command");
 	Serial.println();
 	Serial.println("i2cget address [register]");
 	Serial.println();
@@ -285,7 +303,9 @@ void printHelp(void)
 	Serial.println("Example: '0 0x20 0x50'");
 	Serial.println("Detects devicecs from addres 0x20 to 0x50");
 	Serial.println("");
-	Serial.println("All number kan types as bin/hex/dec, except the command number");
+	Serial.println("All numbers can types as bin/hex/dec, except the command number");
+	Serial.println("");
+	Serial.println("Set your terminal to 'LF' line ending");
 }
 
 void i2cdetect(void)
@@ -303,9 +323,10 @@ void i2cdetect(byte start, byte stop, byte mode)
 	
 	switch(mode)
 	{
-		case MODE_DETECT_FAST: break;
-		case MODE_DETECT_WRITE_ONLY: detectWrite = true;break;
-		case MODE_DETECT_READWRITE: detectWrite = true; detectRead = true; break;
+		case MODE_DETECT_FAST:			detectWrite = false; detectRead = false; break;
+		case MODE_DETECT_WRITE_ONLY:		detectWrite = true; detectRead = true; break;
+		case MODE_DETECT_READ_ONLY:		detectWrite = false; detectRead = true; break;
+		case MODE_DETECT_READWRITE:		detectWrite = true; detectRead = true; break;
 		default:break;
 	}
  
@@ -367,15 +388,17 @@ void i2cdump(byte address, byte start, byte stop, byte mode)
 {
 	int pos = 0;
 	boolean autoincrement = false;
-	boolean first_read = false;
+	boolean write_reg = true;
 	byte ret_value = 0;
 	
 	
   
 	switch(mode)
 	{
-		case MODE_DUMP_AUTOINCREMENT: autoincrement = true; break;
-		case MODE_DUMP_NORMAL:
+		case MODE_DUMP_NORMAL:				autoincrement = false; write_reg = true; break;
+		case MODE_DUMP_AUTOINCREMENT: 			autoincrement = true; write_reg = true; break;
+		case MODE_DUMP_NORMAL_WITHOUTWRITE :		autoincrement = false; write_reg = false; break;
+		case MODE_DUMP_AUTOINCREMENT_WITHOUTWRITE:	autoincrement = true; write_reg = false; break;
 		default: break;
 	}
   
@@ -385,35 +408,58 @@ void i2cdump(byte address, byte start, byte stop, byte mode)
 		pos++;
 	}
   
-	do
+	if(autoincrement == false)
 	{
-		if((first_read == false) || (autoincrement == false))
+		do
 		{
 			Wire.beginTransmission(address);
-			Wire.write(pos);
+			if(write_reg == true) Wire.write(pos);
 			ret_value = Wire.endTransmission();
-			first_read = true;
-		}
-       
-		if(ret_value == 0)
-		{
-			Wire.requestFrom((int)address, 1);
-			delayMicroseconds(2);
-			if(Wire.available())
+			
+			if(ret_value == 0)
 			{
-				data[pos] = Wire.read();
+				Wire.requestFrom((int)address, 1);
+				delayMicroseconds(2);
+				if(Wire.available())
+				{
+					data[pos] = Wire.read();
+				}
+				else
+				{
+					data[pos] = CHAR_X;
+				}
 			}
 			else
 			{
 				data[pos] = CHAR_X;
 			}
+			pos++; 
+		} while(pos <= stop);
+	}
+	else if(mode = MODE_DUMP_AUTOINCREMENT)
+	{
+		Wire.beginTransmission(address);
+		if(write_reg == true) Wire.write(pos);
+		ret_value = Wire.endTransmission();
+		
+		if(ret_value == 0)
+		{
+			Wire.requestFrom((int)address, stop - start);
+			delayMicroseconds(2);
+			while(Wire.available())
+			{
+				data[pos] = Wire.read();
+				pos++;
+			}
 		}
-		else
+		
+		while(pos < stop)
 		{
 			data[pos] = CHAR_X;
+			pos++; 
 		}
-		pos++; 
-	} while(pos <= stop);
+		
+	}
   
 	printdata(data, DATA_LENGTH, MODE_PRINT_SHOW_ASCCI, (int)stop + 1);
 }
