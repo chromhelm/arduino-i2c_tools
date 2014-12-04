@@ -10,7 +10,6 @@
 #define DEBUG 0
 
 
-
 #define CHAR_SPACE 0x100
 #define CHAR_LINE 0x101
 #define CHAR_X 0x102
@@ -20,6 +19,11 @@
 #define COMMAND_GET 2
 #define COMMAND_SET 3
 #define COMMAND_HELP 4
+#define COMMAND_SET_VAR 5
+#define COMMAND_GET_VAR 6
+
+#define VAR_SPEED 0
+
 
 #define MODE_PRINT_NORMAL 0
 #define MODE_PRINT_SHOW_ASCCI 1
@@ -48,24 +52,31 @@
 #define ASCCI_CR 0x0D
 
 #define DATA_LENGTH 256
-//ARG_MAX_COUNT * (max length of number(bin == 8+2) + space) + command + space + CR + NL + (end of string)
-#define SERIALBUFFER_LENGTH ARG_MAX_COUNT * (10 + 1) + 1 + 1 + 1 + 1 + 1
+//ARG_MAX_COUNT * (max length of number(bin == 32 + 2) + space) + command + space + CR + NL + (end of string)
+#define SERIALBUFFER_LENGTH ARG_MAX_COUNT * ((32 + 2)  + 1)     + 1       + 1     + 1  + 1  + 1
 
-int data[DATA_LENGTH + 1];
+#ifndef cbi
+#define cbi(sfr, bit) (_SFR_BYTE(sfr) &= ~_BV(bit))
+#endif
+#ifndef sbi
+#define sbi(sfr, bit) (_SFR_BYTE(sfr) |= _BV(bit))
+#endif
+
+int16_t data[DATA_LENGTH + 1];
 char serialbuffer[SERIALBUFFER_LENGTH + 16];
 
 void setup()
 {
 	Wire.begin();
 
-	Serial.begin(9600);
+	Serial.begin(115200);
 	while(!Serial) printHelp();
 }
 
 
 void loop()
 {
-	static int buffer_pos = 0;
+	static int16_t buffer_pos = 0;
 	int temp = 0;
 
 	
@@ -74,7 +85,7 @@ void loop()
 	if(buffer_pos > 0)
 	{
 #if (DEBUG == 1)
-                Serial.print("ECHO:");
+                Serial.print("ECHO: ");
                 Serial.write((byte*)serialbuffer, buffer_pos);//
 		Serial.println();                             //terminal echo
 #endif		
@@ -82,7 +93,7 @@ void loop()
 		if(temp != 0)
 		{
 #if (DEBUG == 1)
-                        Serial.print("return value=");
+                        Serial.print("return value= ");
                         Serial.println(temp);
                         Serial.println();
 #endif
@@ -105,10 +116,11 @@ void serialFlush()
 
 //return 0 on succses
 // > 0 on error
-byte handelCommand(char* buffer, int buffer_length)
+byte handelCommand(char* buffer, int16_t buffer_length)
 {
-	int command, arg[ARG_MAX_COUNT + 1], arg_count = 0;
-	int pos = 0, temp;
+	int8_t command = -1, arg_count = 0;
+	int32_t arg[ARG_MAX_COUNT + 1];
+	int16_t pos = 0, temp;
 
 	//Find the command
 	if(buffer_length <= 0) return 1;
@@ -117,8 +129,15 @@ byte handelCommand(char* buffer, int buffer_length)
 	else if(serialbuffer[pos] == '2') command = COMMAND_GET;
 	else if(serialbuffer[pos] == '3') command = COMMAND_SET;
 	else if((serialbuffer[pos] == 'h') || (serialbuffer[pos] == 'H'))  command = COMMAND_HELP;
+	else if((serialbuffer[pos] == 's') || (serialbuffer[pos] == 's'))  command = COMMAND_SET_VAR;
+	else if((serialbuffer[pos] == 'g') || (serialbuffer[pos] == 'g'))  command = COMMAND_GET_VAR;
 	else return 2;
 	pos++;
+
+#if (DEBUG == 1)
+                        Serial.print("command= ");
+                        Serial.println(command);
+#endif
 
 	if((buffer_length > 1) && !((serialbuffer[pos] == ' ') || (serialbuffer[pos] == ASCCI_NL) || (serialbuffer[pos] == ASCCI_CR)))
 	{
@@ -134,13 +153,32 @@ byte handelCommand(char* buffer, int buffer_length)
 			break;
 		}
 		
-		temp = read_number(buffer, buffer_length, pos, &(arg[arg_count]), 0xFF); //get number from string
+		if((command == COMMAND_SET_VAR) && (arg_count == 1))
+		{
+			temp = read_number(buffer, buffer_length, pos, &(arg[arg_count]), 400000); //get number from string
+		}
+		else{
+			temp = read_number_byte(buffer, buffer_length, pos, &(arg[arg_count])); //get number from string
+		}
 		
 		if(temp < 0) return 50 + temp * -1; //return if ther is an error
 		pos = temp;
 		arg_count++;
 	}
 	
+#if (DEBUG == 1)
+                        Serial.print("arg count= ");
+                        Serial.println(arg_count);
+                        
+                        for(int i = 0; i < arg_count;i++)
+                        {
+                                Serial.print("arg[");
+                                Serial.print(i);
+                                Serial.print("]= ");
+                                Serial.println(arg[i]);
+                        }
+#endif
+
 	//if ther ar more arg. at alowet return an error
 	if(arg_count > ARG_MAX_COUNT)
 	{
@@ -186,9 +224,21 @@ byte handelCommand(char* buffer, int buffer_length)
 			printHelp();
 			break;
 		}
+		case COMMAND_SET_VAR:
+		{
+			if(arg_count == 2) VarSet(arg[0], arg[1]);
+			else return 11;
+			break;
+		}
+		case COMMAND_GET_VAR:
+		{
+			if(arg_count == 1) VarGet(arg[0]);
+			else return 12;
+			break;
+		}
 		default:
 		{
-			return 11;
+			return 13;
 			break;
 		}
 	}
@@ -197,10 +247,15 @@ byte handelCommand(char* buffer, int buffer_length)
 
 //return new position
 //< 0 on error
-int read_number(char* buffer, int buffer_length, int pos, int* ret, int max)
+int16_t read_number_byte(char* buffer, int16_t buffer_length, int16_t pos, int32_t* number)
 {
-	int number = 0;
+	return read_number(buffer, buffer_length, pos, number, 0xFF);
+}
+
+int16_t read_number(char* buffer, int16_t buffer_length, int16_t pos, int32_t* number, int32_t max)
+{
 	byte numberBase = 10;
+	*number = 0;
 	
 	//remove all leadings free spaces
 	while(buffer[pos] == ' ')
@@ -213,12 +268,12 @@ int read_number(char* buffer, int buffer_length, int pos, int* ret, int max)
 	{
 		//if ther is an x, set base to hex
 		//if ther are more than one x or b, or x are in the middel of the number, it will fail
-		if(((buffer[pos] == 'x') || (buffer[pos] == 'X')) && (number == 0) && (numberBase == 10))
+		if(((buffer[pos] == 'x') || (buffer[pos] == 'X')) && (*number == 0) && (numberBase == 10))
 		{
 			numberBase = 16;
 		}
 		//if the is an b, replace base to bin
-		else if(((buffer[pos] == 'b') || (buffer[pos] == 'b')) && (number == 0) && (numberBase == 10))
+		else if(((buffer[pos] == 'b') || (buffer[pos] == 'b')) && (*number == 0) && (numberBase == 10))
 		{
 			numberBase = 2;
 		}
@@ -247,27 +302,26 @@ int read_number(char* buffer, int buffer_length, int pos, int* ret, int max)
 		}
 		else 
 		{
-			number *= numberBase;
+			*number *= numberBase;
 			if(buffer[pos] >= 'a')
 			{
-				number += buffer[pos] - 'a' + 10;
+				*number += buffer[pos] - 'a' + 10;
 			}
 			else if(buffer[pos] >= 'A')
 			{
-				number += buffer[pos] - 'A' + 10;
+				*number += buffer[pos] - 'A' + 10;
 			}
 			else
 			{
-				number += buffer[pos] - '0';
+				*number += buffer[pos] - '0';
 			}
-			if(number > max)
+			if(*number > max)
 			{
 				return -5;
 			}
 		}
 		pos++;
 	}
-	*ret = number;
 	return pos;
 }
 
@@ -280,17 +334,19 @@ void printHelp(void)
 	Serial.println("1 = i2cdump");
 	Serial.println("2 = i2cget");
 	Serial.println("3 = i2cset");
+	Serial.println("g = get a variable");
+	Serial.println("s = set a variable");
 	Serial.println("h = show this help page");
 	Serial.println();
 	Serial.println("i2cdetect [start stop [mode]]");
-	Serial.println("     Mode's");
+	Serial.println("     Mode's:");
 	Serial.println("     0 = Fast detect, send a start condition");
 	Serial.println("     1 = Just try to read");
 	Serial.println("     2 = Send a single write 0x00 on the bus");
 	Serial.println("     3 = Send a single write 0x00, and try to read a register");
 	Serial.println();
 	Serial.println("i2cdump address [start stop [mode]]");
-	Serial.println("     Mode's");
+	Serial.println("     Mode's:");
 	Serial.println("     0 = Read one register at once");
 	Serial.println("     1 = Use for devices with auto increment");
 	Serial.println("     2 = Read one register at once, Do not send write comand");
@@ -302,10 +358,71 @@ void printHelp(void)
 	Serial.println();
 	Serial.println("Example: '0 0x20 0x50'");
 	Serial.println("Detects devicecs from addres 0x20 to 0x50");
-	Serial.println("");
+	Serial.println();
+	Serial.println("get var");
+	Serial.println("set var value");
+	Serial.println("     Variables:");
+	Serial.println("     0 = clk speed 1 - 400000(It can be set to higher speed, but it is not recommended)");
+	Serial.println();
 	Serial.println("All numbers can types as bin/hex/dec, except the command number");
-	Serial.println("");
+	Serial.println();
 	Serial.println("Set your terminal to 'LF' line ending");
+}
+
+void VarSet(byte var, int32_t value)
+{
+	switch(var)
+	{
+		case VAR_SPEED:
+		{
+// 			TWPS1	TWPS0  	Prescaler Value 
+// 			0	0  	1 
+// 			0  	1  	4
+// 			1	0	16 
+// 			1  	1  	64 
+// 			
+// 					  CPU Clock frequency
+// 			SCL frequency = -----------------------
+// 					 16 + 2(TWBR) ⋅ 4^TWPS
+			
+			
+			uint8_t divider = 0;
+			uint16_t speed;
+			
+			speed = ((F_CPU / value) - 16) / 2;
+			
+			while(speed >= 256)
+			{
+				speed /= 4;
+				divider++;;
+			}
+			
+			TWBR = speed;
+			((divider & 0x01) == true) ? (sbi(TWSR,TWPS0)) : (cbi(TWSR,TWPS0));
+			((divider & 0x02) == true) ? (sbi(TWSR,TWPS1)) : (cbi(TWSR,TWPS1));
+			break;
+		}
+		default:break;
+	}
+}
+
+
+void VarGet(byte var)
+{
+	switch(var)
+	{
+		case VAR_SPEED:
+		{
+#if (DEBUG == 1)
+			Serial.println(TWBR);
+			Serial.println(TWSR & 0x03);
+#endif
+			Serial.print( F_CPU / (16 + 2*TWBR * pow(4, TWSR & 0x03 )) / 1000);
+			Serial.println("kHz");
+			break;
+		}
+		default:break;
+	}
 }
 
 void i2cdetect(void)
