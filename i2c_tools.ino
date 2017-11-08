@@ -115,7 +115,6 @@ void loop()
     buffer_pos = 0;
     serialFlush();
   }
-  delay(100);    
 }
 
 void serialFlush() 
@@ -185,8 +184,10 @@ int16_t getArguments(char* buffer, int16_t buffer_length, int16_t pos, int32_t *
   while(pos < buffer_length && *argc < ARG_MAX_COUNT && buffer[pos]) 
   {
     pos = read_number(buffer, buffer_length, pos, &(arg[*argc])); //get number from string
+#if (DEBUG == 1)
     Serial.print("read number ret:");
     Serial.println(pos);
+#endif
     if(pos < 0)
     {
       return -1; //return if there is an error
@@ -214,7 +215,7 @@ int16_t getArguments(char* buffer, int16_t buffer_length, int16_t pos, int32_t *
   } 
   else 
   {
-  return pos;
+    return pos;
   }
 }
 
@@ -477,9 +478,9 @@ void i2cdetect(uint8_t start, uint8_t stop, ModeDetect_t mode)
   switch(mode) 
   {
     case MODE_DETECT_FAST:        detectWrite = false; detectRead = false; break;
-    case MODE_DETECT_READ_ONLY:   detectWrite = false; detectRead = true; break;
+    case MODE_DETECT_READ_ONLY:   detectWrite = false; detectRead = true;  break;
     case MODE_DETECT_WRITE_ONLY:  detectWrite = true;  detectRead = false; break;
-    case MODE_DETECT_READWRITE:   detectWrite = true;  detectRead = true; break;
+    case MODE_DETECT_READWRITE:   detectWrite = true;  detectRead = true;  break;
     default:break;
   }
  
@@ -505,9 +506,7 @@ void i2cdetect(uint8_t start, uint8_t stop, ModeDetect_t mode)
     {
       if(detectRead == true) 
       {
-        delayMicroseconds(1000);
         Wire.requestFrom(address, 1);
-        delayMicroseconds(1000);
         if(Wire.available() > 0) 
         {
           while(Wire.available())
@@ -577,7 +576,6 @@ void i2cdump(uint8_t address, uint8_t start, uint8_t stop, ModeDump_t mode)
       if(ret_value == 0) 
       {
         Wire.requestFrom((int)address, 1);
-        delayMicroseconds(2);
         if(Wire.available()) 
         {
           data[pos] = Wire.read();
@@ -606,7 +604,6 @@ void i2cdump(uint8_t address, uint8_t start, uint8_t stop, ModeDump_t mode)
     if(ret_value == 0) 
     {
       Wire.requestFrom((int)address, stop - start);
-      delayMicroseconds(2);
       while(Wire.available())
       {
         data[pos] = Wire.read();
@@ -670,7 +667,6 @@ int16_t i2cget(uint8_t address, uint8_t reg_address, ModeGet_t mode)
   if((mode == MODE_GET_WRITE_READ && temp == 0) || mode == MODE_GET_NORMAL) 
   {
     Wire.requestFrom((int)address, 1);
-    delayMicroseconds(2);
     if(Wire.available()) 
     {
       ret = Wire.read();
